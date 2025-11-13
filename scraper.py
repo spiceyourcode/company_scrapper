@@ -54,51 +54,126 @@ UK_CITIES_LOWER = {city.lower() for city in UK_CITIES}
 # --- SECTOR MAPPING DEFINITION ---
 SECTOR_KEYWORDS_MAP = {
     # Construction and Property
-    'Builders and construction': ['construction', 'building', 'erection', 'development of building projects', 'residential building', 'demolition', 'civil engineering', 'renovation', 'plumbers', 'electricians', 'roofing activities', 'carpenter', 'foundations and framing', 'glazing', 'joinery', 'plasterers', 'scaffolding'],
-    'Real estate': ['real estate', 'property', 'letting agent', 'estate agents', 'residents property management', 'property management'],
-    'Architect': ['architectural', 'architect', 'quantity surveying'],
-    'Installation of industrial machinery and equipment': ['installation of industrial machinery', 'installation of electrical wiring'],
-    'Development of building projects': ['development of building projects', 'house building', 'construction of domestic buildings'],
-    'Maintenance and repair': ['repair of motor vehicles', 'maintenance of motor vehicles', 'handyman', 'maintenance', 'vehicle recovery', 'repair'],
-    
+    'Builders and construction': [
+        'construction', 'building', 'erection', 'development projects', 'residential building',
+        'demolition', 'civil engineering', 'renovation', 'plumbing', 'electricians',
+        'roofing', 'carpentry', 'foundations', 'framing', 'glazing', 'joinery',
+        'plastering', 'scaffolding', 'specialised construction'
+    ],
+    'Real estate': [
+        'real estate', 'property', 'letting agent', 'estate agent', 'residents property management',
+        'property management', 'buying and selling of real estate'
+    ],
+    'Architect': ['architect', 'architecture', 'quantity surveying', 'design planning'],
+    'Installation of industrial machinery and equipment': [
+        'industrial machinery installation', 'equipment installation', 'electrical wiring installation'
+    ],
+    'Development of building projects': [
+        'development of building projects', 'house construction', 'domestic buildings'
+    ],
+    'Maintenance and repair of motor vehicles': [
+        'repair', 'maintenance', 'motor vehicles', 'vehicle recovery', 'handyman services'
+    ],
+
     # Professional Services
-    'Management consultancy': ['management consultancy', 'business consulting', 'change management', 'outsourcing', 'risk and damage evaluation'],
-    'Accountants': ['accountants', 'book keeping', 'tax', 'auditing'],
-    'Lawyers and solicitors and barristers': ['solicitors', 'lawyers', 'legal activities', 'legal services'],
-    'Human resources services': ['employment placement', 'recruitment', 'staffing', 'human resources'],
-    'Administration': ['administration', 'head offices', 'combined office administrative'],
-    
+    'Management consultancy': [
+        'management consulting', 'business consulting', 'change management', 'outsourcing',
+        'risk evaluation', 'strategy consulting', 'operations consulting'
+    ],
+    'Accountants': ['accounting', 'bookkeeping', 'tax', 'auditing', 'financial audit'],
+    'Lawyers and solicitors and barristers': [
+        'solicitor', 'lawyer', 'legal services', 'legal practice', 'barrister'
+    ],
+    'Human resources services': [
+        'employment placement', 'recruitment', 'staffing', 'human resources', 'talent acquisition'
+    ],
+    'Administration': [
+        'administration', 'head office', 'office administration', 'corporate office management'
+    ],
+
     # IT and Technology
-    'Information technology and services': ['information technology', 'IT services', 'cloud computing', 'cybersecurity', 'computer programming', 'software development', 'web development', 'systems integration', 'analytics', 'embedded software', 'ai', 'robotics'],
-    'Telecommunications': ['telecommunications', 'wireless services'],
-    
-    # Retail and Hospitality
-    'Retail': ['retail sale', 'wholesale', 'stores', 'dealerships', 'convenience stores', 'bookstores', 'boutique', 'vintage and thrift'],
-    'Restaurants': ['restaurants', 'pub food', 'takeaways', 'cafe', 'bars and pubs'],
-    'Hotels': ['hotels', 'accommodation', 'holiday and collective accommodation'],
-    
-    # Manufacturing
-    'Manufacturing': ['manufacture of', 'making of', 'fabrication', 'appliances', 'electronics', 'textile manufacturing', 'chemical manufacturing', 'plastics manufacturing', 'rubber products', 'machinery', 'packaging and containers'],
-    
-    # Media and Marketing
-    'Advertising': ['advertising', 'content marketing', 'digital marketing', 'public relations', 'branding', 'creative services'],
-    'Media': ['media production', 'broadcast media', 'film', 'sound recording', 'publishing', 'internet publishing'],
-    
+    'Information technology and services': [
+        'information technology', 'it services', 'cloud computing', 'cybersecurity',
+        'computer programming', 'software development', 'web development', 'systems integration',
+        'analytics', 'embedded software', 'ai', 'artificial intelligence', 'robotics'
+    ],
+    'Telecommunications': ['telecommunications', 'wireless communication', 'network services'],
+
+    # Retail, Hospitality, and Food
+    'Retail': [
+        'retail sale', 'wholesale', 'store', 'dealership', 'shop', 'boutique', 'supermarket',
+        'thrift', 'ecommerce', 'e-commerce', 'online shop'
+    ],
+    'Restaurants': [
+        'restaurant', 'pub', 'takeaway', 'food stand', 'cafe', 'coffee shop', 'bar'
+    ],
+    'Hotels': [
+        'hotel', 'accommodation', 'holiday rental', 'lodging', 'hospitality'
+    ],
+
+    # Manufacturing and Industry
+    'Manufacturing': [
+        'manufacturing', 'production', 'fabrication', 'making of', 'assembly',
+        'appliances', 'electronics', 'textile', 'chemical', 'plastic', 'rubber',
+        'machinery', 'packaging', 'container manufacturing', 'equipment manufacturing'
+    ],
+
+    # Media, Marketing, and Communication
+    'Advertising': [
+        'advertising', 'content marketing', 'digital marketing', 'public relations',
+        'branding', 'creative services', 'communications services'
+    ],
+    'Media': [
+        'media production', 'broadcasting', 'film', 'motion picture', 'video production',
+        'sound recording', 'publishing', 'internet publishing', 'music production'
+    ],
+
     # Health and Wellness
-    'Healthcare': ['medical', 'healthcare', 'dental', 'optometry', 'radiology', 'clinical research', 'veterinarian', 'pharmacies'],
-    'Wellness': ['yoga', 'pilates', 'meditation', 'fitness', 'massages', 'counselling services'],
-    'Beauty': ['hair and beauty', 'barbers', 'salon', 'cosmetics'],
-    
+    'Healthcare': [
+        'medical', 'healthcare', 'dental', 'optometry', 'radiology',
+        'clinical research', 'pharmacy', 'veterinary', 'hospital'
+    ],
+    'Wellness': [
+        'wellness', 'yoga', 'pilates', 'meditation', 'fitness', 'massage', 'therapy',
+        'counselling', 'mental health'
+    ],
+    'Beauty': [
+        'beauty', 'hair', 'barber', 'salon', 'cosmetics', 'skincare', 'spa', 'aesthetics'
+    ],
+
     # Transport and Logistics
-    'Freight and logistics': ['freight', 'logistics', 'warehousing and storage', 'courier', 'cargo handling'],
-    'Transport': ['transport', 'taxi', 'rail transportation', 'sightseeing transportation', 'ground passenger transportation'],
-    
-    # Other Specific Sectors
-    'Financial services': ['financial services', 'banking', 'capital markets', 'investment management', 'fintech', 'venture capital', 'private equity'],
-    'Education': ['primary and secondary education', 'education', 'language school', 'e learning', 'academy', 'professional training and coaching'],
-    'Charities and non profits': ['charitable activities', 'non profit organizations', 'civic and social organizations', 'fundraising'],
-    'Dormant company': ['dormant company'],
+    'Freight and logistics': [
+        'freight', 'logistics', 'courier', 'warehousing', 'storage', 'cargo', 'distribution'
+    ],
+    'Transport': [
+        'transport', 'taxi', 'bus', 'rail', 'ground passenger', 'sightseeing', 'vehicle transport'
+    ],
+
+    # Finance and Business
+    'Financial services': [
+        'financial services', 'banking', 'capital markets', 'investment management',
+        'fintech', 'insurance', 'venture capital', 'private equity'
+    ],
+    'Business support services': [
+        'business support', 'back office', 'shared services', 'corporate services', 'bpo'
+    ],
+
+    # Education and Training
+    'Education': [
+        'education', 'training', 'academy', 'learning', 'school', 'college', 'e-learning',
+        'professional training', 'language school', 'teaching'
+    ],
+
+    # Charity and Nonprofit
+    'Charities and non profits': [
+        'charity', 'non-profit', 'philanthropy', 'social organization', 'fundraising',
+        'community development', 'voluntary organization'
+    ],
+
+    # Default / Other
+    'Dormant company': ['dormant company', 'inactive company', 'non-trading entity']
 }
+
 # Transform all keywords in the map to lowercase for comparison
 SECTOR_KEYWORDS_MAP_LOWER = {
     sector: [kw.lower() for kw in keywords]
