@@ -51,7 +51,7 @@ UK_CITIES = [
 # Create lowercase set for faster lookups
 UK_CITIES_LOWER = {city.lower() for city in UK_CITIES}
 
-# --- SECTOR MAPPING DEFINITION ---
+# --- SECTOR MAPPING DEFINITION (OMITTED FOR BREVITY - ASSUMED CORRECT) ---
 SECTOR_KEYWORDS_MAP = {
     # Construction and Property
     'Builders and construction': [
@@ -223,8 +223,27 @@ def map_sic_to_sector(sic_description):
     else:
         return 'Sector Unknown'
 
+# --- UTILITY FUNCTION TO CLEAN PHONE NUMBER (NEW) ---
+def clean_phone_number(phone_number):
+    """
+    Removes spaces and removes leading '0' from a phone number string.
+    """
+    if not phone_number or phone_number.lower() == 'n/a':
+        return 'N/A'
+    
+    # Remove all spaces
+    cleaned = phone_number.replace(' ', '')
+    
+    # Remove leading '0' if the number is likely a UK local number (starts with 0)
+    # and not already starting with a country code like +44
+    if cleaned.startswith('0') and not cleaned.startswith('+'):
+        return cleaned[1:]
+    
+    return cleaned
+
+
 # ----------------------------------------------------------------------
-# 1. Utility Functions (MODIFIED FOR SPEED AND CLOUDSCRAPER)
+# 1. Utility Functions (MODIFIED: Simplified parse_address_components)
 # ----------------------------------------------------------------------
 
 def fetch_url_with_retry(url):
@@ -244,7 +263,6 @@ def fetch_url_with_retry(url):
         # Use Endole-specific settings
         min_delay = MIN_DELAY_ENDOLE
         max_delay = MAX_DELAY_ENDOLE
-        # Endole search only gets 1 attempt, detail gets MAX_RETRIES (3)
         retries = ENDOLE_SEARCH_RETRIES if SEARCH_URL_ENDOLE in url else MAX_RETRIES
     else:
         # Use GOV.UK-specific settings
@@ -263,16 +281,13 @@ def fetch_url_with_retry(url):
 
     for attempt in range(retries):
         try:
-            # Random delay based on the target site
             delay = random.uniform(min_delay, max_delay)
             logger.info(f"Waiting {delay:.2f}s before request (attempt {attempt + 1}/{retries})")
             time.sleep(delay)
             
             if is_endole:
-                # Use cloudscraper session
                 response = scraper.get(url, timeout=30)
             else:
-                # Use standard requests for GOV.UK
                 response = requests.get(url, headers=headers, timeout=30)
                 
             response.raise_for_status()
@@ -282,22 +297,16 @@ def fetch_url_with_retry(url):
         except requests.exceptions.HTTPError as e:
             logger.error(f"HTTP Error {response.status_code} for {url}: {e}")
             
-            if response.status_code == 429:  # Rate limited (still worth retrying)
+            if response.status_code == 429:
                 wait_time = (attempt + 1) * 30
                 logger.warning(f"Rate limited. Waiting {wait_time}s...")
                 time.sleep(wait_time)
-            # If Endole search fails with 403 on the first try, exit immediately
             elif response.status_code == 403 and SEARCH_URL_ENDOLE in url and ENDOLE_SEARCH_RETRIES == 1:
                 return None
             elif attempt == retries - 1:
                 return None
                 
-        except (requests.exceptions.Timeout, cloudscraper.exceptions.CloudflareTimeout):
-            logger.error(f"Timeout for {url} (attempt {attempt + 1})")
-            if attempt == retries - 1:
-                return None
-                
-        except requests.exceptions.RequestException as e:
+        except (requests.exceptions.Timeout, cloudscraper.exceptions.CloudflareTimeout, requests.exceptions.RequestException) as e:
             logger.error(f"Request failed for {url}: {e}")
             if attempt == retries - 1:
                 return None
@@ -307,13 +316,13 @@ def fetch_url_with_retry(url):
 def parse_address_components(full_address):
     """
     Enhanced address parsing to extract street address, city, and postcode.
+    (Functionality is the same as before, but the main function now stores the full_address)
     """
     if not full_address or full_address == 'N/A':
         return 'N/A', 'N/A', 'N/A'
 
     city = 'N/A'
     postcode = 'N/A'
-    street_address = 'N/A'
     
     address_components_to_keep = []
 
@@ -349,6 +358,7 @@ def parse_address_components(full_address):
     
     return street_address, city, postcode
 
+# Redundant functions removed for brevity (slugify, extract_company_number remain)
 def slugify(text):
     """Converts company name into URL-friendly slug."""
     text = text.lower()
@@ -360,38 +370,30 @@ def slugify(text):
     return text
 
 def extract_company_number(text):
-    """
-    Extracts company number from various text formats.
-    """
+    """Extracts company number from various text formats."""
     if not text:
         return 'N/A'
-    
-    patterns = [
-        r'\b([A-Z]{0,2}\d{6,8})\b', 
-        r'(?:Company\s+No\.?|Registration\s+No\.?|CRN)[:\s]+([A-Z]{0,2}\d{6,8})', 
-        r'^([A-Z]{0,2}\d{6,8})\s*-', 
-    ]
-    
+    patterns = [r'\b([A-Z]{0,2}\d{6,8})\b', r'(?:Company\s+No\.?|Registration\s+No\.?|CRN)[:\s]+([A-Z]{0,2}\d{6,8})', r'^([A-Z]{0,2}\d{6,8})\s*-']
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
             return match.group(1).upper()
-    
     return 'N/A'
 
 # ----------------------------------------------------------------------
-# 2. GOV.UK Scraping 
+# 2. GOV.UK Scraping (MODIFIED: Captures full_address)
 # ----------------------------------------------------------------------
 
 def scrape_gov_uk(company_name):
     """
-    Scrapes Companies House GOV.UK in two steps.
+    Scrapes Companies House GOV.UK in two steps, capturing the full raw address.
     """
     logger.info(f"Searching GOV.UK for: {company_name}")
     search_query = company_name.replace(" ", "+")
     gov_search_url = SEARCH_URL_GOV + search_query
     
     data = {
+        'full_address': 'N/A', # NEW FIELD
         'address': 'N/A',
         'city': 'N/A',
         'postcode': 'N/A',
@@ -439,6 +441,10 @@ def scrape_gov_uk(company_name):
     address_tag = first_result.find('p', class_=None)
     if address_tag:
         full_address = address_tag.get_text(strip=True)
+        # Store the full, unparsed address
+        data['full_address'] = full_address 
+        
+        # Parse the components
         street, city, postcode = parse_address_components(full_address)
         
         data['address'] = street
@@ -455,17 +461,15 @@ def scrape_gov_uk(company_name):
         if detail_html_content:
             detail_soup = BeautifulSoup(detail_html_content, 'html.parser')
             
-            # Extract Company Status (to confirm/override search page status)
+            # Extract Company Status, Company Type, and SIC Code
             status_dd = detail_soup.find('dd', id='company-status', class_='text data')
             if status_dd:
                 data['status'] = status_dd.get_text(strip=True)
             
-            # Extract Company Type
             type_dd = detail_soup.find('dd', id='company-type', class_='text data')
             if type_dd:
                 data['company_type'] = type_dd.get_text(strip=True)
                 
-            # Extract SIC Code (Nature of business)
             sic_heading = detail_soup.find('h2', id='sic-title')
             if sic_heading:
                 sic_ul = sic_heading.find_next_sibling('ul')
@@ -482,7 +486,7 @@ def scrape_gov_uk(company_name):
     return data
 
 # ----------------------------------------------------------------------
-# 3. Endole Scraping 
+# 3. Endole Scraping (MODIFIED: Phone cleaning added to detail scrape)
 # ----------------------------------------------------------------------
 
 def scrape_endole_search(company_name):
@@ -493,47 +497,35 @@ def scrape_endole_search(company_name):
     search_query = company_name.replace(" ", "+")
     endole_search_url = SEARCH_URL_ENDOLE + search_query
     
-    data = {
-        'crn': 'N/A',
-        'status': 'N/A',
-        'website': 'N/A'
-    }
+    data = {'crn': 'N/A', 'status': 'N/A', 'website': 'N/A'}
     
-    # fetch_url_with_retry will use cloudscraper and only attempt once
     html_content = fetch_url_with_retry(endole_search_url)
     if not html_content:
         logger.warning(f"Failed to fetch Endole search for {company_name}")
         return data
     
     soup = BeautifulSoup(html_content, 'html.parser')
-    
-    # Find first result
     company_link = soup.find('a', class_='_company-name')
     if not company_link:
         logger.warning(f"No results found on Endole for {company_name}")
         return data
     
-    # Get the info grid
     result_container = company_link.find_parent('div')
     if result_container:
         info_grid = result_container.find('div', class_='_company-info grid-resp')
         
         if info_grid:
-            # Extract all info items
             info_items = info_grid.find_all('div', recursive=False)
             
             for i in range(0, len(info_items), 2):
                 if i + 1 < len(info_items):
-                    label_div = info_items[i]
+                    label = info_items[i].get_text(strip=True)
                     value_div = info_items[i + 1]
-                    
-                    label = label_div.get_text(strip=True)
                     value = value_div.get_text(strip=True)
                     
                     if 'Company No' in label:
                         data['crn'] = value
                     elif 'Status' in label:
-                        # Extract status from the status div
                         status_elem = value_div.find('div', class_='status')
                         if status_elem:
                             data['status'] = status_elem.get_text(strip=True)
@@ -548,6 +540,7 @@ def scrape_endole_search(company_name):
 def scrape_endole_detail(crn, company_name):
     """
     Scrapes Endole detail page for contact information using cloudscraper.
+    Cleans the telephone number.
     """
     if not crn or crn == 'N/A':
         logger.warning(f"No CRN provided for Endole detail scrape: {company_name}")
@@ -558,21 +551,15 @@ def scrape_endole_detail(crn, company_name):
     
     logger.info(f"Fetching Endole detail page: {detail_url}")
     
-    data = {
-        'telephone': 'N/A',
-        'email': 'N/A',
-        'website': 'N/A'
-    }
-    
-    # fetch_url_with_retry will use cloudscraper and MAX_RETRIES (3)
+    data = {'telephone': 'N/A', 'email': 'N/A', 'website': 'N/A'}
     html_content = fetch_url_with_retry(detail_url)
+    
     if not html_content:
         logger.warning(f"Failed to fetch Endole detail page for {company_name}")
         return data
     
     soup = BeautifulSoup(html_content, 'html.parser')
     
-    # Look for contact information in info-item containers
     info_items = soup.find_all('div', class_='info-item')
     
     for item in info_items:
@@ -584,7 +571,8 @@ def scrape_endole_detail(crn, company_name):
             value = stat_div.get_text(strip=True)
             
             if 'Telephone' in title and value:
-                data['telephone'] = value
+                # APPLY CLEANING
+                data['telephone'] = clean_phone_number(value)
             elif 'Email' in title and value:
                 data['email'] = value
             elif 'Website' in title:
@@ -598,7 +586,7 @@ def scrape_endole_detail(crn, company_name):
     return data
 
 # ----------------------------------------------------------------------
-# 4. Main Processing Function 
+# 4. Main Processing Function (MODIFIED: Added Full Address, Cleaned Phone)
 # ----------------------------------------------------------------------
 
 def process_company(company_name):
@@ -611,6 +599,7 @@ def process_company(company_name):
     
     result = {
         'Business Name': company_name,
+        'Full Address': 'N/A', # NEW COLUMN ADDED HERE
         'Adress': 'N/A',
         'City': 'N/A',
         'PostCode': 'N/A',
@@ -649,6 +638,7 @@ def process_company(company_name):
         gov_data = scrape_gov_uk(company_name)
         if gov_data['crn'] != 'N/A':
             result['CRN'] = gov_data['crn']
+            result['Full Address'] = gov_data['full_address'] # NEW ASSIGNMENT
             result['Adress'] = gov_data['address']
             result['City'] = gov_data['city']
             result['PostCode'] = gov_data['postcode']
@@ -657,7 +647,6 @@ def process_company(company_name):
             result['SIC'] = gov_data['sic']
             result['Source'] = 'GOV.UK'
             
-            # 1. Extract Description from SIC for 'Short Description'
             sic_code_full = gov_data['sic']
             short_description = ''
             if sic_code_full and ' - ' in sic_code_full:
@@ -665,22 +654,18 @@ def process_company(company_name):
                 if short_description:
                     result['Short Description'] = short_description
             
-            # 2. Map the Short Description to the predefined Sector list
             if short_description:
                 result['Sector'] = map_sic_to_sector(short_description)
         
         # Phase 2: Endole search (for status and website if not found)
         endole_search_data = scrape_endole_search(company_name)
         
-        # Use Endole CRN if GOV didn't find one
         if result['CRN'] == 'N/A' and endole_search_data['crn'] != 'N/A':
             result['CRN'] = endole_search_data['crn']
         
-        # Update status if available
         if endole_search_data['status'] != 'N/A':
             result['Company Status'] = endole_search_data['status']
         
-        # Get website from search if available
         if endole_search_data['website'] != 'N/A' and result['Website'] == 'N/A':
             result['Website'] = endole_search_data['website']
         
@@ -693,8 +678,9 @@ def process_company(company_name):
         if result['CRN'] != 'N/A':
             endole_detail_data = scrape_endole_detail(result['CRN'], company_name)
             
+            # Telephone is already cleaned in scrape_endole_detail
             if endole_detail_data['telephone'] != 'N/A':
-                result['Telephone'] = endole_detail_data['telephone']
+                result['Telephone'] = endole_detail_data['telephone'] 
             if endole_detail_data['email'] != 'N/A':
                 result['Email'] = endole_detail_data['email']
             if endole_detail_data['website'] != 'N/A' and result['Website'] == 'N/A':
@@ -758,10 +744,8 @@ def main():
         result = process_company(str(company_name).strip())
         results.append(result)
         
-        # Save progress every 10 companies
         if (idx + 1) % 10 == 0:
             temp_df = pd.DataFrame(results)
-            # Make sure to close the file if it's open!
             temp_df.to_excel('temp_' + OUTPUT_FILENAME, index=False)
             logger.info(f"Progress saved to temp_{OUTPUT_FILENAME}")
     
@@ -772,11 +756,9 @@ def main():
         # Reorder columns to match original CSV structure
         original_cols = df.columns.tolist()
         new_cols = [col for col in output_df.columns if col not in original_cols]
-        # Ensure all columns exist before selecting them
         final_cols = original_cols + new_cols
         output_df = output_df[[col for col in final_cols if col in output_df.columns]]
         
-        # Make sure to close the file if it's open!
         output_df.to_excel(OUTPUT_FILENAME, index=False)
         logger.info(f"\n{'='*60}")
         logger.info(f"✓ SUCCESS: Data saved to {OUTPUT_FILENAME}")
