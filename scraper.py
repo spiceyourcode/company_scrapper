@@ -8,21 +8,19 @@ from datetime import datetime
 import logging
 import cloudscraper # Import for Cloudflare bypass
 
-# --- CONFIGURATION (MODIFIED FOR SPEED) ---
+# --- CONFIGURATION ---
 INPUT_FILENAME = "company_list.csv"
 OUTPUT_FILENAME = "company_data_filled.xlsx"
 
-# Speed optimization - GOV.UK is less sensitive, so we speed it up
-MIN_DELAY_GOV = 1     # New minimum delay for GOV.UK
-MAX_DELAY_GOV = 3     # New maximum delay for GOV.UK
+# Speed optimization - GOV.UK 
+MIN_DELAY_GOV = 1
+MAX_DELAY_GOV = 3
 
-# Speed optimization - Endole is highly sensitive 
-MIN_DELAY_ENDOLE = 5  # Keep Endole search/detail delays moderate
-MAX_DELAY_ENDOLE = 10 # Keep Endole search/detail delays moderate
+# Speed optimization - Endole
+MIN_DELAY_ENDOLE = 5
+MAX_DELAY_ENDOLE = 10
 
-MAX_RETRIES = 3       # Default retries for GOV.UK and Endole detail
-
-# Retries for Endole search (Set to 1 to avoid massive wasted time if 403 persists)
+MAX_RETRIES = 3
 ENDOLE_SEARCH_RETRIES = 1 
 
 # Base URLs
@@ -31,7 +29,52 @@ SEARCH_URL_GOV = "https://find-and-update.company-information.service.gov.uk/sea
 GOV_BASE_URL = "https://find-and-update.company-information.service.gov.uk"
 ENDOLE_DETAIL_BASE_URL = "https://open.endole.co.uk/insight/company"
 
-# UK Cities to exclude from address field 
+# --- POSTCODE TO CITY MAPPING (EXPANDED AND REFINED) ---
+# This dictionary maps the outward code (postcode prefix/district) or the
+# Postcode Area (1-2 letters) to the canonical City from the user's list.
+
+POSTCODE_TO_CITY_MAP = {
+    # 1. Specific Prefixes (More granular, usually 3-4 characters)
+    'BB5': 'Preston', 'BL9': 'Manchester', 'BR2': 'London', 'BR3': 'London', 
+    'BS8': 'Bristol', 'BT92': 'Belfast', 'CR8': 'London', 'CT5': 'Canterbury', 
+    'E17': 'London', 'HA1': 'London', 'HP16': 'Oxford', 'HR4': 'Worcester', 
+    'IG8': 'London', 'IP1': 'Colchester', 'LE7': 'Leicester', 'LL11': 'Wrexham', 
+    'N18': 'London', 'NR4': 'Norwich', 'PE3': 'Peterborough', 'PE30': 'Norwich', 
+    'PO18': 'Chichester', 'PR9': 'Liverpool', 'RG19': 'Oxford', 'RM8': 'London', 
+    'SW17': 'London', 'WC1B': 'London', 'WC2A': 'London', 'WC2H': 'London',
+    
+    # 2. General Postcode Area Mappings (1-2 characters)
+    # These map the entire area to the most prominent city in your list.
+    
+    # ENGLAND 
+    'AL': 'St albans', 'B': 'Birmingham', 'BA': 'Bath', 'BD': 'Bradford', 
+    'BN': 'Brighton and hove', 'BS': 'Bristol', 'CA': 'Carlisle', 'CB': 'Cambridge', 
+    'CM': 'Chelmsford', 'CO': 'Colchester', 'CV': 'Coventry', 'DE': 'Derby', 
+    'DH': 'Durham', 'DN': 'Doncaster', 'EX': 'Exeter', 'GL': 'Gloucester', 
+    'HR': 'Hereford', 'HU': 'Kingston upon hull', 'L': 'Liverpool', 'LA': 'Lancaster', 
+    'LE': 'Leicester', 'LN': 'Lincoln', 'LS': 'Leeds', 'M': 'Manchester', 
+    'MK': 'Milton keynes', 'NE': 'Newcastle upon tyne', 'NG': 'Nottingham', 
+    'NR': 'Norwich', 'OX': 'Oxford', 'PE': 'Peterborough', 'PL': 'Plymouth', 
+    'PO': 'Portsmouth', 'PR': 'Preston', 'S': 'Sheffield', 'SO': 'Southampton', 
+    'SS': 'Southend on sea', 'ST': 'Stoke on trent', 'SR': 'Sunderland', 'TR': 'Truro', 
+    'WF': 'Wakefield', 'WR': 'Worcester', 'WV': 'Wolverhampton', 'YO': 'York',
+    
+    # LONDON
+    'E': 'London', 'EC': 'London', 'N': 'London', 'NW': 'London',
+    'SE': 'London', 'SW': 'London', 'W': 'London', 'WC': 'London',
+    
+    # WALES
+    'CF': 'Cardiff', 'LL': 'Wrexham', 'NP': 'Newport', 
+    
+    # SCOTLAND
+    'AB': 'Aberdeen', 'DD': 'Dundee', 'EH': 'Edinburgh', 'FK': 'Stirling', 
+    'G': 'Glasgow', 'IV': 'Inverness', 'KY': 'Dunfermline',
+    
+    # NORTHERN IRELAND (BT covers all NI cities in the list)
+    'BT': 'Belfast', 
+}
+
+# The user's canonical list of cities is kept for other validation purposes 
 UK_CITIES = [
     'Bath', 'Birmingham', 'Bradford', 'Brighton and hove', 'Bristol', 'Cambridge',
     'Canterbury', 'Carlisle', 'Chelmsford', 'Chester', 'Chichester', 'Colchester',
@@ -47,134 +90,40 @@ UK_CITIES = [
     'Armagh', 'Belfast', 'Derry', 'Lisburn', 'Newry', 'Coleraine', 'Ballymena',
     'Londonderry'
 ]
-
-# Create lowercase set for faster lookups
 UK_CITIES_LOWER = {city.lower() for city in UK_CITIES}
 
-# --- SECTOR MAPPING DEFINITION (OMITTED FOR BREVITY - ASSUMED CORRECT) ---
+# --- SECTOR MAPPING DEFINITION ---
 SECTOR_KEYWORDS_MAP = {
-    # Construction and Property
-    'Builders and construction': [
-        'construction', 'building', 'erection', 'development projects', 'residential building',
-        'demolition', 'civil engineering', 'renovation', 'plumbing', 'electricians',
-        'roofing', 'carpentry', 'foundations', 'framing', 'glazing', 'joinery',
-        'plastering', 'scaffolding', 'specialised construction'
-    ],
-    'Real estate': [
-        'real estate', 'property', 'letting agent', 'estate agent', 'residents property management',
-        'property management', 'buying and selling of real estate'
-    ],
+    'Builders and construction': ['construction', 'building', 'erection', 'development projects', 'residential building', 'demolition', 'civil engineering', 'renovation', 'plumbing', 'electricians', 'roofing', 'carpentry', 'foundations', 'framing', 'glazing', 'joinery', 'plastering', 'scaffolding', 'specialised construction'],
+    'Real estate': ['real estate', 'property', 'letting agent', 'estate agent', 'residents property management', 'property management', 'buying and selling of real estate'],
     'Architect': ['architect', 'architecture', 'quantity surveying', 'design planning'],
-    'Installation of industrial machinery and equipment': [
-        'industrial machinery installation', 'equipment installation', 'electrical wiring installation'
-    ],
-    'Development of building projects': [
-        'development of building projects', 'house construction', 'domestic buildings'
-    ],
-    'Maintenance and repair of motor vehicles': [
-        'repair', 'maintenance', 'motor vehicles', 'vehicle recovery', 'handyman services'
-    ],
-
-    # Professional Services
-    'Management consultancy': [
-        'management consulting', 'business consulting', 'change management', 'outsourcing',
-        'risk evaluation', 'strategy consulting', 'operations consulting'
-    ],
+    'Installation of industrial machinery and equipment': ['industrial machinery installation', 'equipment installation', 'electrical wiring installation'],
+    'Development of building projects': ['development of building projects', 'house construction', 'domestic buildings'],
+    'Maintenance and repair of motor vehicles': ['repair', 'maintenance', 'motor vehicles', 'vehicle recovery', 'handyman services'],
+    'Management consultancy': ['management consulting', 'business consulting', 'change management', 'outsourcing', 'risk evaluation', 'strategy consulting', 'operations consulting'],
     'Accountants': ['accounting', 'bookkeeping', 'tax', 'auditing', 'financial audit'],
-    'Lawyers and solicitors and barristers': [
-        'solicitor', 'lawyer', 'legal services', 'legal practice', 'barrister'
-    ],
-    'Human resources services': [
-        'employment placement', 'recruitment', 'staffing', 'human resources', 'talent acquisition'
-    ],
-    'Administration': [
-        'administration', 'head office', 'office administration', 'corporate office management'
-    ],
-
-    # IT and Technology
-    'Information technology and services': [
-        'information technology', 'it services', 'cloud computing', 'cybersecurity',
-        'computer programming', 'software development', 'web development', 'systems integration',
-        'analytics', 'embedded software', 'ai', 'artificial intelligence', 'robotics'
-    ],
+    'Lawyers and solicitors and barristers': ['solicitor', 'lawyer', 'legal services', 'legal practice', 'barrister'],
+    'Human resources services': ['employment placement', 'recruitment', 'staffing', 'human resources', 'talent acquisition'],
+    'Administration': ['administration', 'head office', 'office administration', 'corporate office management'],
+    'Information technology and services': ['information technology', 'it services', 'cloud computing', 'cybersecurity', 'computer programming', 'software development', 'web development', 'systems integration', 'analytics', 'embedded software', 'ai', 'artificial intelligence', 'robotics'],
     'Telecommunications': ['telecommunications', 'wireless communication', 'network services'],
-
-    # Retail, Hospitality, and Food
-    'Retail': [
-        'retail sale', 'wholesale', 'store', 'dealership', 'shop', 'boutique', 'supermarket',
-        'thrift', 'ecommerce', 'e-commerce', 'online shop'
-    ],
-    'Restaurants': [
-        'restaurant', 'pub', 'takeaway', 'food stand', 'cafe', 'coffee shop', 'bar'
-    ],
-    'Hotels': [
-        'hotel', 'accommodation', 'holiday rental', 'lodging', 'hospitality'
-    ],
-
-    # Manufacturing and Industry
-    'Manufacturing': [
-        'manufacturing', 'production', 'fabrication', 'making of', 'assembly',
-        'appliances', 'electronics', 'textile', 'chemical', 'plastic', 'rubber',
-        'machinery', 'packaging', 'container manufacturing', 'equipment manufacturing'
-    ],
-
-    # Media, Marketing, and Communication
-    'Advertising': [
-        'advertising', 'content marketing', 'digital marketing', 'public relations',
-        'branding', 'creative services', 'communications services'
-    ],
-    'Media': [
-        'media production', 'broadcasting', 'film', 'motion picture', 'video production',
-        'sound recording', 'publishing', 'internet publishing', 'music production'
-    ],
-
-    # Health and Wellness
-    'Healthcare': [
-        'medical', 'healthcare', 'dental', 'optometry', 'radiology',
-        'clinical research', 'pharmacy', 'veterinary', 'hospital'
-    ],
-    'Wellness': [
-        'wellness', 'yoga', 'pilates', 'meditation', 'fitness', 'massage', 'therapy',
-        'counselling', 'mental health'
-    ],
-    'Beauty': [
-        'beauty', 'hair', 'barber', 'salon', 'cosmetics', 'skincare', 'spa', 'aesthetics'
-    ],
-
-    # Transport and Logistics
-    'Freight and logistics': [
-        'freight', 'logistics', 'courier', 'warehousing', 'storage', 'cargo', 'distribution'
-    ],
-    'Transport': [
-        'transport', 'taxi', 'bus', 'rail', 'ground passenger', 'sightseeing', 'vehicle transport'
-    ],
-
-    # Finance and Business
-    'Financial services': [
-        'financial services', 'banking', 'capital markets', 'investment management',
-        'fintech', 'insurance', 'venture capital', 'private equity'
-    ],
-    'Business support services': [
-        'business support', 'back office', 'shared services', 'corporate services', 'bpo'
-    ],
-
-    # Education and Training
-    'Education': [
-        'education', 'training', 'academy', 'learning', 'school', 'college', 'e-learning',
-        'professional training', 'language school', 'teaching'
-    ],
-
-    # Charity and Nonprofit
-    'Charities and non profits': [
-        'charity', 'non-profit', 'philanthropy', 'social organization', 'fundraising',
-        'community development', 'voluntary organization'
-    ],
-
-    # Default / Other
+    'Retail': ['retail sale', 'wholesale', 'store', 'dealership', 'shop', 'boutique', 'supermarket', 'thrift', 'ecommerce', 'e-commerce', 'online shop'],
+    'Restaurants': ['restaurant', 'pub', 'takeaway', 'food stand', 'cafe', 'coffee shop', 'bar'],
+    'Hotels': ['hotel', 'accommodation', 'holiday rental', 'lodging', 'hospitality'],
+    'Manufacturing': ['manufacturing', 'production', 'fabrication', 'making of', 'assembly', 'appliances', 'electronics', 'textile', 'chemical', 'plastic', 'rubber', 'machinery', 'packaging', 'container manufacturing', 'equipment manufacturing'],
+    'Advertising': ['advertising', 'content marketing', 'digital marketing', 'public relations', 'branding', 'creative services', 'communications services'],
+    'Media': ['media production', 'broadcasting', 'film', 'motion picture', 'video production', 'sound recording', 'publishing', 'internet publishing', 'music production'],
+    'Healthcare': ['medical', 'healthcare', 'dental', 'optometry', 'radiology', 'clinical research', 'pharmacy', 'veterinary', 'hospital'],
+    'Wellness': ['wellness', 'yoga', 'pilates', 'meditation', 'fitness', 'massage', 'therapy', 'counselling', 'mental health'],
+    'Beauty': ['beauty', 'hair', 'barber', 'salon', 'cosmetics', 'skincare', 'spa', 'aesthetics'],
+    'Freight and logistics': ['freight', 'logistics', 'courier', 'warehousing', 'storage', 'cargo', 'distribution'],
+    'Transport': ['transport', 'taxi', 'bus', 'rail', 'ground passenger', 'sightseeing', 'vehicle transport'],
+    'Financial services': ['financial services', 'banking', 'capital markets', 'investment management', 'fintech', 'insurance', 'venture capital', 'private equity'],
+    'Business support services': ['business support', 'back office', 'shared services', 'corporate services', 'bpo'],
+    'Education': ['education', 'training', 'academy', 'learning', 'school', 'college', 'e-learning', 'professional training', 'language school', 'teaching'],
+    'Charities and non profits': ['charity', 'non-profit', 'philanthropy', 'social organization', 'fundraising', 'community development', 'voluntary organization'],
     'Dormant company': ['dormant company', 'inactive company', 'non-trading entity']
 }
-
-# Transform all keywords in the map to lowercase for comparison
 SECTOR_KEYWORDS_MAP_LOWER = {
     sector: [kw.lower() for kw in keywords]
     for sector, keywords in SECTOR_KEYWORDS_MAP.items()
@@ -191,17 +140,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- SECTOR MAPPING FUNCTION ---
+# --- UTILITY FUNCTIONS ---
 
 def map_sic_to_sector(sic_description):
-    """
-    Maps a cleaned SIC description to a predefined sector using keyword matching.
-    """
+    """Maps a cleaned SIC description to a predefined sector."""
     if not sic_description or sic_description.lower() == 'n/a':
         return 'N/A'
     
     desc_lower = sic_description.lower()
-    
     best_match = 'Multi sector company'
     max_keyword_length = 0
 
@@ -209,8 +155,7 @@ def map_sic_to_sector(sic_description):
         return 'Dormant company'
     
     for sector, keywords in SECTOR_KEYWORDS_MAP_LOWER.items():
-        if sector == 'Dormant company': 
-            continue
+        if sector == 'Dormant company': continue
             
         for keyword in keywords:
             if keyword in desc_lower:
@@ -218,20 +163,13 @@ def map_sic_to_sector(sic_description):
                     best_match = sector
                     max_keyword_length = len(keyword)
 
-    if max_keyword_length > 0:
-        return best_match
-    else:
-        return 'Sector Unknown'
+    return best_match if max_keyword_length > 0 else 'Sector Unknown'
 
-# --- UTILITY FUNCTION TO CLEAN PHONE NUMBER (NEW) ---
 def clean_phone_number(phone_number):
-    """
-    Removes spaces and removes leading '0' from a phone number string.
-    """
+    """Removes spaces and removes leading '0' from a phone number string."""
     if not phone_number or phone_number.lower() == 'n/a':
         return 'N/A'
     
-    # Remove all spaces
     cleaned = phone_number.replace(' ', '')
     
     # Remove leading '0' if the number is likely a UK local number (starts with 0)
@@ -241,15 +179,53 @@ def clean_phone_number(phone_number):
     
     return cleaned
 
+def extract_postcode_prefix(postcode):
+    """Extracts the outward code (prefix) from a full UK postcode."""
+    if not postcode or postcode.lower() == 'n/a':
+        return None
+    postcode = str(postcode).strip().upper()
+    postcode_compact = postcode.replace(' ', '')
+    
+    # Check if the compact postcode is long enough to determine an outward code
+    if len(postcode_compact) >= 5:
+        # Outward code is the part before the last 3 chars (the inward code)
+        return postcode_compact[:-3]
+    
+    # For short/incomplete postcodes, use the whole thing if non-empty
+    if len(postcode_compact) > 0:
+        return postcode_compact
+    
+    return None
 
-# ----------------------------------------------------------------------
-# 1. Utility Functions (MODIFIED: Simplified parse_address_components)
-# ----------------------------------------------------------------------
+def get_city_from_postcode_prefix(postcode):
+    """
+    Looks up the City based on the postcode's outward code (prefix) using the map.
+    It checks for a full prefix match first, then falls back to the Postcode Area.
+    """
+    prefix = extract_postcode_prefix(postcode)
+    
+    if prefix:
+        # 1. Check for exact match of the full prefix (e.g., 'BB5', 'WC1B')
+        city = POSTCODE_TO_CITY_MAP.get(prefix)
+        if city:
+            return city
+            
+        # 2. Fallback: Check for match of the 1 or 2-letter Postcode Area (e.g., 'BB', 'WC')
+        # Postcode Area is typically the part of the prefix before the first digit.
+        area_code_match = re.match(r'^([A-Z]{1,2})', prefix)
+        if area_code_match:
+            area_code = area_code_match.group(1)
+            city = POSTCODE_TO_CITY_MAP.get(area_code)
+            if city:
+                return city
+    
+    # If the postcode is present but the prefix isn't in our map, return 'N/A'
+    return 'N/A'
+
 
 def fetch_url_with_retry(url):
     """
     Fetches a URL with retry logic and random delays, using cloudscraper for Endole.
-    Uses dedicated delay settings for GOV.UK vs. Endole.
     """
     is_endole = 'endole.co.uk' in url
 
@@ -260,12 +236,10 @@ def fetch_url_with_retry(url):
             logger.error(f"Failed to initialize cloudscraper: {e}")
             return None
         
-        # Use Endole-specific settings
         min_delay = MIN_DELAY_ENDOLE
         max_delay = MAX_DELAY_ENDOLE
         retries = ENDOLE_SEARCH_RETRIES if SEARCH_URL_ENDOLE in url else MAX_RETRIES
     else:
-        # Use GOV.UK-specific settings
         min_delay = MIN_DELAY_GOV
         max_delay = MAX_DELAY_GOV
         retries = MAX_RETRIES
@@ -315,50 +289,47 @@ def fetch_url_with_retry(url):
 
 def parse_address_components(full_address):
     """
-    Enhanced address parsing to extract street address, city, and postcode.
-    (Functionality is the same as before, but the main function now stores the full_address)
+    Parses full address to extract PostCode and Street Address.
+    City extraction is intentionally set to 'N/A' here to rely on the PostCode lookup.
     """
     if not full_address or full_address == 'N/A':
-        return 'N/A', 'N/A', 'N/A'
+        return 'N/A', 'N/A', 'N/A' # street, city, postcode
 
-    city = 'N/A'
     postcode = 'N/A'
+    street_address = 'N/A'
     
-    address_components_to_keep = []
-
+    # 1. Postcode Extraction
     postcode_pattern = r'\b([A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2})\b'
     postcode_match = re.search(postcode_pattern, full_address, re.IGNORECASE)
 
     if postcode_match:
         postcode = postcode_match.group(1).strip().upper()
-        address_to_parse = full_address[:postcode_match.start()].strip()
+        # Remove postcode and any preceding comma/space from the address string
+        address_parts_raw = full_address[:postcode_match.start()].strip(', ')
     else:
-        address_to_parse = full_address
-        
-    address_parts = [part.strip() for part in address_to_parse.split(',') if part.strip()]
+        address_parts_raw = full_address
 
+    address_parts = [part.strip() for part in address_parts_raw.split(',') if part.strip()]
+
+    # 2. Heuristic for street_address (Remove UK city if it's the last part)
+    street_components_to_keep = []
+    
     if address_parts:
-        potential_city = address_parts[-1]
+        last_part = address_parts[-1]
         
-        if potential_city.lower() in UK_CITIES_LOWER:
-            city = potential_city
-            address_components_to_keep = address_parts[:-1]
-            
+        # If the last part looks like a known city, remove it to clean the street address.
+        if last_part.lower() in UK_CITIES_LOWER:
+            street_components_to_keep = address_parts[:-1]
         else:
-            city = potential_city
-            address_components_to_keep = address_parts[:-1] 
+            # Otherwise, keep it as part of the address.
+            street_components_to_keep = address_parts
 
-    if address_components_to_keep:
-        street_address = ', '.join(address_components_to_keep)
-    else:
-        street_address = 'N/A' if city != 'N/A' else address_to_parse
-
-    street_address = street_address.strip(', ')
+    street_address = ', '.join(street_components_to_keep).strip(', ')
     street_address = street_address if street_address else 'N/A'
     
-    return street_address, city, postcode
+    # City is deliberately set to 'N/A' here, forcing the caller (scrape_gov_uk) to use the Postcode map.
+    return street_address, 'N/A', postcode 
 
-# Redundant functions removed for brevity (slugify, extract_company_number remain)
 def slugify(text):
     """Converts company name into URL-friendly slug."""
     text = text.lower()
@@ -371,29 +342,25 @@ def slugify(text):
 
 def extract_company_number(text):
     """Extracts company number from various text formats."""
-    if not text:
-        return 'N/A'
+    if not text: return 'N/A'
     patterns = [r'\b([A-Z]{0,2}\d{6,8})\b', r'(?:Company\s+No\.?|Registration\s+No\.?|CRN)[:\s]+([A-Z]{0,2}\d{6,8})', r'^([A-Z]{0,2}\d{6,8})\s*-']
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            return match.group(1).upper()
+        if match: return match.group(1).upper()
     return 'N/A'
 
 # ----------------------------------------------------------------------
-# 2. GOV.UK Scraping (MODIFIED: Captures full_address)
+# 2. GOV.UK Scraping 
 # ----------------------------------------------------------------------
 
 def scrape_gov_uk(company_name):
-    """
-    Scrapes Companies House GOV.UK in two steps, capturing the full raw address.
-    """
+    """Scrapes Companies House GOV.UK, using postcode prefix to find the City."""
     logger.info(f"Searching GOV.UK for: {company_name}")
     search_query = company_name.replace(" ", "+")
     gov_search_url = SEARCH_URL_GOV + search_query
     
     data = {
-        'full_address': 'N/A', # NEW FIELD
+        'full_address': 'N/A',
         'address': 'N/A',
         'city': 'N/A',
         'postcode': 'N/A',
@@ -405,7 +372,6 @@ def scrape_gov_uk(company_name):
         'detail_url_suffix': None 
     }
     
-    # --- STEP 1: Scrape Search Page (for initial details and detail link) ---
     html_content = fetch_url_with_retry(gov_search_url)
     if not html_content:
         logger.warning(f"Failed to fetch GOV.UK search page for {company_name}")
@@ -418,7 +384,6 @@ def scrape_gov_uk(company_name):
         logger.warning(f"No results found on GOV.UK for {company_name}")
         return data
     
-    # Extract CRN and Detail Link Suffix
     link = first_result.find('a', class_='govuk-link')
     if link and link.get('href'):
         data['detail_url_suffix'] = link.get('href') 
@@ -426,14 +391,12 @@ def scrape_gov_uk(company_name):
         if crn_match:
             data['crn'] = crn_match.group(1).upper()
     
-    # Extract Address, Incorporation Date, Status from search result
     meta_tag = first_result.find('p', class_='meta crumbtrail')
     if meta_tag:
         meta_text = meta_tag.get_text(strip=True)
         crn_from_meta = extract_company_number(meta_text)
         if crn_from_meta != 'N/A':
             data['crn'] = crn_from_meta
-        
         date_match = re.search(r'Incorporated\s+on\s+(\d{1,2}\s+\w+\s+\d{4})', meta_text)
         if date_match:
             data['incorporation_date'] = date_match.group(1)
@@ -441,18 +404,18 @@ def scrape_gov_uk(company_name):
     address_tag = first_result.find('p', class_=None)
     if address_tag:
         full_address = address_tag.get_text(strip=True)
-        # Store the full, unparsed address
         data['full_address'] = full_address 
         
-        # Parse the components
-        street, city, postcode = parse_address_components(full_address)
+        street, _, postcode = parse_address_components(full_address) # City returned is N/A
         
         data['address'] = street
-        data['city'] = city
         data['postcode'] = postcode
         data['status'] = 'Active' 
+        
+        # NEW LOGIC: Use Postcode to determine City (overrides the N/A from parsing)
+        data['city'] = get_city_from_postcode_prefix(postcode)
     
-    # --- STEP 2: Scrape Detail Page (for Company Type and SIC) ---
+    # --- STEP 2: Scrape Detail Page ---
     if data['detail_url_suffix'] and data['crn'] != 'N/A':
         detail_url = GOV_BASE_URL + data['detail_url_suffix']
         logger.info(f"Fetching GOV.UK detail page: {detail_url}")
@@ -461,22 +424,18 @@ def scrape_gov_uk(company_name):
         if detail_html_content:
             detail_soup = BeautifulSoup(detail_html_content, 'html.parser')
             
-            # Extract Company Status, Company Type, and SIC Code
             status_dd = detail_soup.find('dd', id='company-status', class_='text data')
-            if status_dd:
-                data['status'] = status_dd.get_text(strip=True)
+            if status_dd: data['status'] = status_dd.get_text(strip=True)
             
             type_dd = detail_soup.find('dd', id='company-type', class_='text data')
-            if type_dd:
-                data['company_type'] = type_dd.get_text(strip=True)
+            if type_dd: data['company_type'] = type_dd.get_text(strip=True)
                 
             sic_heading = detail_soup.find('h2', id='sic-title')
             if sic_heading:
                 sic_ul = sic_heading.find_next_sibling('ul')
                 if sic_ul:
                     sic_span = sic_ul.find('span', id=lambda x: x and x.startswith('sic'))
-                    if sic_span:
-                        data['sic'] = sic_span.get_text(strip=True)
+                    if sic_span: data['sic'] = sic_span.get_text(strip=True)
 
         else:
             logger.warning(f"Failed to fetch GOV.UK detail page for CRN: {data['crn']}")
@@ -486,29 +445,25 @@ def scrape_gov_uk(company_name):
     return data
 
 # ----------------------------------------------------------------------
-# 3. Endole Scraping (MODIFIED: Phone cleaning added to detail scrape)
+# 3. Endole Scraping
 # ----------------------------------------------------------------------
 
 def scrape_endole_search(company_name):
-    """
-    Scrapes Endole search page for company number and basic info using cloudscraper.
-    """
+    """Scrapes Endole search page for company number and basic info using cloudscraper."""
     logger.info(f"Searching Endole for: {company_name}")
     search_query = company_name.replace(" ", "+")
     endole_search_url = SEARCH_URL_ENDOLE + search_query
     
     data = {'crn': 'N/A', 'status': 'N/A', 'website': 'N/A'}
-    
     html_content = fetch_url_with_retry(endole_search_url)
+    
     if not html_content:
         logger.warning(f"Failed to fetch Endole search for {company_name}")
         return data
     
     soup = BeautifulSoup(html_content, 'html.parser')
     company_link = soup.find('a', class_='_company-name')
-    if not company_link:
-        logger.warning(f"No results found on Endole for {company_name}")
-        return data
+    if not company_link: return data
     
     result_container = company_link.find_parent('div')
     if result_container:
@@ -523,25 +478,20 @@ def scrape_endole_search(company_name):
                     value_div = info_items[i + 1]
                     value = value_div.get_text(strip=True)
                     
-                    if 'Company No' in label:
-                        data['crn'] = value
+                    if 'Company No' in label: data['crn'] = value
                     elif 'Status' in label:
                         status_elem = value_div.find('div', class_='status')
-                        if status_elem:
-                            data['status'] = status_elem.get_text(strip=True)
+                        if status_elem: data['status'] = status_elem.get_text(strip=True)
                     elif 'Website' in label:
                         website_link = value_div.find('a')
-                        if website_link:
-                            data['website'] = website_link.get('href', 'N/A')
+                        if website_link: data['website'] = website_link.get('href', 'N/A')
+                        elif value: data['website'] = value
     
     logger.info(f"Endole search extraction completed for {company_name}")
     return data
 
 def scrape_endole_detail(crn, company_name):
-    """
-    Scrapes Endole detail page for contact information using cloudscraper.
-    Cleans the telephone number.
-    """
+    """Scrapes Endole detail page for contact information, cleans the telephone number."""
     if not crn or crn == 'N/A':
         logger.warning(f"No CRN provided for Endole detail scrape: {company_name}")
         return {'telephone': 'N/A', 'email': 'N/A', 'website': 'N/A'}
@@ -559,7 +509,6 @@ def scrape_endole_detail(crn, company_name):
         return data
     
     soup = BeautifulSoup(html_content, 'html.parser')
-    
     info_items = soup.find_all('div', class_='info-item')
     
     for item in info_items:
@@ -571,35 +520,30 @@ def scrape_endole_detail(crn, company_name):
             value = stat_div.get_text(strip=True)
             
             if 'Telephone' in title and value:
-                # APPLY CLEANING
                 data['telephone'] = clean_phone_number(value)
             elif 'Email' in title and value:
                 data['email'] = value
             elif 'Website' in title:
                 website_link = stat_div.find('a')
-                if website_link:
-                    data['website'] = website_link.get('href', value)
-                elif value:
-                    data['website'] = value
+                if website_link: data['website'] = website_link.get('href', value)
+                elif value: data['website'] = value
     
     logger.info(f"Endole detail extraction completed for {company_name}")
     return data
 
 # ----------------------------------------------------------------------
-# 4. Main Processing Function (MODIFIED: Added Full Address, Cleaned Phone)
+# 4. Main Processing Function 
 # ----------------------------------------------------------------------
 
 def process_company(company_name):
-    """
-    Main function to process a single company by scraping multiple sources.
-    """
+    """Main function to process a single company by scraping multiple sources."""
     logger.info(f"\n{'='*60}")
     logger.info(f"Processing: {company_name}")
     logger.info(f"{'='*60}")
     
     result = {
         'Business Name': company_name,
-        'Full Address': 'N/A', # NEW COLUMN ADDED HERE
+        'Full Address': 'N/A',
         'Adress': 'N/A',
         'City': 'N/A',
         'PostCode': 'N/A',
@@ -638,7 +582,7 @@ def process_company(company_name):
         gov_data = scrape_gov_uk(company_name)
         if gov_data['crn'] != 'N/A':
             result['CRN'] = gov_data['crn']
-            result['Full Address'] = gov_data['full_address'] # NEW ASSIGNMENT
+            result['Full Address'] = gov_data['full_address']
             result['Adress'] = gov_data['address']
             result['City'] = gov_data['city']
             result['PostCode'] = gov_data['postcode']
@@ -657,7 +601,7 @@ def process_company(company_name):
             if short_description:
                 result['Sector'] = map_sic_to_sector(short_description)
         
-        # Phase 2: Endole search (for status and website if not found)
+        # Phase 2 & 3: Endole
         endole_search_data = scrape_endole_search(company_name)
         
         if result['CRN'] == 'N/A' and endole_search_data['crn'] != 'N/A':
@@ -674,11 +618,9 @@ def process_company(company_name):
         else:
             result['Source'] = 'Endole'
         
-        # Phase 3: Endole detail page (for contact info)
         if result['CRN'] != 'N/A':
             endole_detail_data = scrape_endole_detail(result['CRN'], company_name)
             
-            # Telephone is already cleaned in scrape_endole_detail
             if endole_detail_data['telephone'] != 'N/A':
                 result['Telephone'] = endole_detail_data['telephone'] 
             if endole_detail_data['email'] != 'N/A':
@@ -699,14 +641,11 @@ def process_company(company_name):
 # ----------------------------------------------------------------------
 
 def main():
-    """
-    Main execution function.
-    """
+    """Main execution function."""
     logger.info("="*60)
     logger.info("Company Data Scraper - Starting")
     logger.info("="*60)
     
-    # Load input file
     try:
         if INPUT_FILENAME.endswith('.xlsx'):
             df = pd.read_excel(INPUT_FILENAME)
@@ -729,7 +668,6 @@ def main():
         logger.error(f"Error reading input file: {e}")
         return
     
-    # Process each company
     results = []
     total = len(df)
     
@@ -745,15 +683,15 @@ def main():
         results.append(result)
         
         if (idx + 1) % 10 == 0:
+            # Save partial results periodically
             temp_df = pd.DataFrame(results)
             temp_df.to_excel('temp_' + OUTPUT_FILENAME, index=False)
             logger.info(f"Progress saved to temp_{OUTPUT_FILENAME}")
     
-    # Save final results
     if results:
         output_df = pd.DataFrame(results)
         
-        # Reorder columns to match original CSV structure
+        # Merge new columns with original columns order
         original_cols = df.columns.tolist()
         new_cols = [col for col in output_df.columns if col not in original_cols]
         final_cols = original_cols + new_cols
