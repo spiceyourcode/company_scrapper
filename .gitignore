@@ -4,3 +4,4 @@ scraper.log
 temp_company_data_filled.xlsx
 .venv
 /__pycache__
+company_data_filled.xlsx

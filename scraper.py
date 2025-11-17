@@ -14,13 +14,13 @@ OUTPUT_FILENAME = "company_data_filled.xlsx"
 
 # Speed optimization - GOV.UK 
 MIN_DELAY_GOV = 1
-MAX_DELAY_GOV = 3
+MAX_DELAY_GOV = 2
 
 # Speed optimization - Endole
 MIN_DELAY_ENDOLE = 5
-MAX_DELAY_ENDOLE = 10
+MAX_DELAY_ENDOLE = 7
 
-MAX_RETRIES = 3
+MAX_RETRIES = 2
 ENDOLE_SEARCH_RETRIES = 1 
 
 # Base URLs
